@@ -1,0 +1,8 @@
+{
+  "name": "Remix: RBFLIX",
+  "description": "Uma plataforma profissional de filmes e séries com dados reais do TMDB, interface cinematográfica e experiência premium.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

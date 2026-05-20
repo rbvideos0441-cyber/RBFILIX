@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline | RBFLIX</title>
+  <style>
+    body {
+      background-color: #09090b;
+      color: #fafafa;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .container {
+      max-width: 480px;
+    }
+    .glow-circle {
+      position: relative;
+      width: 96px;
+      height: 96px;
+      background: rgba(234, 88, 12, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      margin: 0 auto 32px;
+      border: 1px solid rgba(234, 88, 12, 0.2);
+    }
+    .icon {
+      width: 44px;
+      height: 44px;
+      stroke: #ea580c;
+      stroke-width: 2;
+      fill: none;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      margin: 0 0 12px;
+      color: #ffffff;
+    }
+    p {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+    .btn {
+      background-color: #ea580c;
+      color: #ffffff;
+      border: none;
+      padding: 12px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      border-radius: 8px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: background-color 0.2s, transform 0.1s;
+    }
+    .btn:hover {
+      background-color: #f97316;
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="glow-circle">
+      <svg class="icon" viewBox="0 0 24 24">
+        <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.58 9M1.42 9a15.91 15.91 0 0 1 8.32-3.87M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>
+      </svg>
+    </div>
+    <h1>Conexão Interrompida</h1>
+    <p>O RBFLIX não conseguiu detectar acesso à internet. Você ainda pode usar o app como PWA offline nos dados ou listas salvos previamente no seu dispositivo.</p>
+    <button class="btn" onclick="window.location.reload()">Recarregar App</button>
+  </div>
+</body>
+</html>

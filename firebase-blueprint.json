@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "Media": {
+      "title": "Media Content",
+      "description": "Manual movie or series added by the admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "name": { "type": "string" },
+        "overview": { "type": "string" },
+        "poster_path": { "type": "string" },
+        "backdrop_path": { "type": "string" },
+        "media_type": { "type": "string", "enum": ["movie", "tv"] },
+        "video_url": { "type": "string" },
+        "vote_average": { "type": "number" },
+        "category": { "type": "string", "enum": ["movies", "series", "kids", "anime"] },
+        "is_featured": { "type": "boolean" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Episode": {
+      "title": "Episode",
+      "description": "An episode of a TV series",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "season_number": { "type": "number" },
+        "episode_number": { "type": "number" },
+        "video_url": { "type": "string" },
+        "overview": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["season_number", "episode_number", "video_url"]
+    },
+    "AppConfig": {
+      "title": "Global Settings",
+      "description": "General application configuration",
+      "type": "object",
+      "properties": {
+        "featured_id": { "type": "string" },
+        "featured_type": { "type": "string" }
+      }
+    },
+    "User": {
+      "title": "Registered User",
+      "description": "User profile with subscription info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "subscriptionActiveUntil": { "type": "number" },
+        "subscriptionStatus": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email"]
+    }
+  },
+  "firestore": {
+    "/custom_media/{mediaId}": {
+      "schema": "Media",
+      "description": "Collection of manually added movies and series",
+      "subcollections": {
+        "episodes": {
+          "schema": "Episode",
+          "description": "Episodes of a TV series"
+        }
+      }
+    },
+    "/app_config/settings": {
+      "schema": "AppConfig",
+      "description": "Global settings for the platform"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User collection containing signup and active subscription details"
+    }
+  }
+}

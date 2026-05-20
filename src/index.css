@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+
+  --color-brand: #E11D48; /* Crimson/Red from the Sleek Interface */
+  --color-surface-900: #080808;
+  --color-surface-800: #121212;
+  --color-surface-700: #1E1E1E;
+}
+
+@layer base {
+  body {
+    @apply bg-surface-900 text-white font-sans overflow-x-hidden selection:bg-brand selection:text-white;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+  
+  .active-tab-indicator {
+    @apply h-1 w-1/2 bg-brand absolute -bottom-1 left-1/4 rounded-full;
+  }
+
+  /* TV Focus States with Elegant Crimson Glow & Premium scale scaling */
+  .tv-focusable {
+    @apply outline-none ring-0 border border-transparent transition-all duration-200 select-none;
+  }
+
+  /* Focus and Active Glow Effects simulating Android TV launcher interfaces */
+  .tv-focusable:focus,
+  .tv-focusable.tv-focused {
+    @apply duration-200 scale-105 border-brand ring-4 ring-brand/50 shadow-[0_0_25px_rgba(225,29,72,0.65)] bg-zinc-900 text-white;
+    z-index: 50 !important;
+  }
+}
+
+/* Hide scrollbar for cleaner look */
+::-webkit-scrollbar {
+  display: none;
+}
