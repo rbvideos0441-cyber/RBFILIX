@@ -10,6 +10,7 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { Mail, Lock, User, ShieldAlert, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -21,6 +22,21 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
 
   const getFirebaseErrorMessage = (errCode: string): React.ReactNode => {
+    const projId = firebaseConfig?.projectId || 'rbflix-dfb92';
+    const currentDomain = window.location.hostname;
+
+    const codeLower = (errCode || '').toLowerCase();
+    if (codeLower.includes('offline') || codeLower.includes('failed to get document') || codeLower.includes('unavailable')) {
+      return (
+        <div>
+          <p className="font-bold">O Firebase detectou que o cliente está offline.</p>
+          <p className="text-gray-300 mt-1 text-[11px] leading-relaxed">
+            Como você está em um ambiente de visualização do AI Studio, os dados offline e o perfil local foram ativados. O sistema continuará funcionando normalmente com recursos locais e simulação de plano ativo mesmo sem conexão direta com o banco de dados.
+          </p>
+        </div>
+      );
+    }
+
     switch (errCode) {
       case 'auth/invalid-email':
         return 'E-mail inválido. Verifique o formato.';
@@ -29,27 +45,53 @@ export default function AuthScreen() {
       case 'auth/user-not-found':
       case 'auth/wrong-password':
       case 'auth/invalid-credential':
-        return 'E-mail ou senha incorretos.';
+        return 'E-mail ou senha incorretos, ou a conta ainda não foi criada neste novo projeto Firebase.';
       case 'auth/email-already-in-use':
         return 'Este e-mail já está cadastrado.';
       case 'auth/weak-password':
         return 'A senha deve ter pelo menos 6 caracteres.';
       case 'auth/operation-not-allowed':
         return (
-          <span>
-            O cadastro com e-mail/senha não está ativo no seu projeto Firebase.{' '}
+          <div>
+            O cadastro com e-mail/senha ou Google não está ativo no seu projeto Firebase ({projId}).{' '}
             <a 
-              href="https://console.firebase.google.com/project/concentrated-task-qkm1r/authentication/providers" 
+              href={`https://console.firebase.google.com/project/${projId}/authentication/providers`} 
               target="_blank" 
               rel="noopener noreferrer"
               className="underline text-red-500 font-bold hover:text-red-400 block mt-2"
             >
-              Clique aqui para ativar o provedor de E-mail/Senha no Console do Firebase
+              Clique aqui para ativar o provedor de E-mail/Senha e Google no Console do seu Firebase
             </a>
-          </span>
+          </div>
+        );
+      case 'auth/unauthorized-domain':
+        return (
+          <div>
+            Este domínio (<span className="font-mono bg-black/30 px-1.5 py-0.5 rounded text-white">{currentDomain}</span>) não está autorizado para autenticação no seu projeto Firebase ({projId}).
+            <br /><br />
+            Para resolver:
+            <ol className="list-decimal pl-4 mt-2 space-y-1 text-[11px] text-gray-300">
+              <li>Acesse o <a href={`https://console.firebase.google.com/project/${projId}/authentication/settings`} target="_blank" rel="noopener noreferrer" className="underline text-red-400 font-bold hover:text-red-300">Console do seu Firebase</a></li>
+              <li>Vá na aba <span className="font-bold text-white">Configurações</span> (Settings) &gt; <span className="font-bold text-white">Domínios Autorizados</span> (Authorized Domains)</li>
+              <li>Adicione o domínio: <span className="font-mono bg-black/30 px-1 px-1.5 py-0.5 rounded text-[11px] text-brand select-all">{currentDomain}</span></li>
+            </ol>
+          </div>
         );
       default:
-        return 'Ocorreu um erro. Certifique-se de que ativou o login com E-mail/Senha no console do Firebase.';
+        return (
+          <div>
+            <p className="font-bold">Ocorreu um erro ao autenticar:</p>
+            <p className="bg-black/40 p-2.5 rounded border border-white/5 font-mono text-[11px] mt-2 select-text text-red-400 break-all">{errCode}</p>
+            <div className="mt-3 text-[11px] text-gray-400 space-y-2">
+              <p>Por favor, certifique-se de que no Console do seu projeto Firebase (<span className="font-bold text-white">{projId}</span>):</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>Ativou os métodos <span className="font-bold text-white">E-mail/Senha</span> e <span className="font-bold text-white">Google</span> em <span className="italic text-gray-300">Authentication &gt; Sign-in method</span>.</li>
+                <li>Criou a base do <span className="font-bold text-white">Firestore Database</span> em modo de teste ou configurou as regras.</li>
+                <li>Adicionou os domínios autorizados necessários.</li>
+              </ul>
+            </div>
+          </div>
+        );
     }
   };
 
@@ -62,22 +104,34 @@ export default function AuthScreen() {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
-      // Check if user document exists in Firestore
-      const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
+      // Safe Firestore Operation (Failure does not abort successful OAuth authentication)
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
 
-      if (!userDoc.exists()) {
-        await setDoc(userDocRef, {
-          id: user.uid,
-          name: user.displayName || 'Usuário',
-          email: user.email || '',
-          subscriptionStatus: 'inactive',
-          subscriptionActiveUntil: 0,
-          createdAt: new Date().toISOString()
-        });
+        if (!userDoc.exists()) {
+          await setDoc(userDocRef, {
+            id: user.uid,
+            name: user.displayName || 'Usuário',
+            email: user.email || '',
+            subscriptionStatus: 'inactive',
+            subscriptionActiveUntil: 0,
+            createdAt: new Date().toISOString()
+          });
+        }
+      } catch (firestoreErr) {
+        console.warn('Silent Firestore check/write failure during Google login, proceeding:', firestoreErr);
       }
     } catch (err: any) {
       console.error('Google Auth Error:', err);
+      const errStr = (err?.message || err?.toString() || '').toLowerCase();
+      const isOfflineError = errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable');
+
+      if (isOfflineError && auth.currentUser) {
+        console.warn('Ignoring offline Firestore error during Google Sign-In as auth is already complete. App will rely on local simulation.');
+        return;
+      }
+
       // Ignore closed popup error (auth/popup-closed-by-user)
       if (err.code !== 'auth/popup-closed-by-user') {
         setError(getFirebaseErrorMessage(err.code || err.message));
@@ -107,17 +161,25 @@ export default function AuthScreen() {
         const user = userCredential.user;
 
         // Save display name
-        await updateProfile(user, { displayName: name });
+        try {
+          await updateProfile(user, { displayName: name });
+        } catch (profileErr) {
+          console.warn('Could not update profile display name, proceeding:', profileErr);
+        }
 
         // Create user document in Firestore to persist plan info
-        await setDoc(doc(db, 'users', user.uid), {
-          id: user.uid,
-          name: name,
-          email: email,
-          subscriptionStatus: 'inactive',
-          subscriptionActiveUntil: 0,
-          createdAt: new Date().toISOString()
-        });
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            id: user.uid,
+            name: name,
+            email: email,
+            subscriptionStatus: 'inactive',
+            subscriptionActiveUntil: 0,
+            createdAt: new Date().toISOString()
+          });
+        } catch (firestoreErr) {
+          console.warn('Silent Firestore write failure during registration, proceeding:', firestoreErr);
+        }
       }
     } catch (err: any) {
       console.error('Auth Error:', err);
@@ -194,7 +256,7 @@ export default function AuthScreen() {
             <ShieldAlert size={18} className="shrink-0 mt-0.5" />
             <div>
               <p className="font-bold uppercase tracking-wider text-[10px]">Verifique os campos</p>
-              <p className="mt-1 opacity-90 leading-relaxed">{error}</p>
+              <div className="mt-1 opacity-90 leading-relaxed">{error}</div>
             </div>
           </motion.div>
         )}

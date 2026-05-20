@@ -19,7 +19,7 @@ const getImageUrl = (path: string | undefined | null, baseUrl: string): string =
 };
 
 const MovieCard: React.FC<MovieCardProps> = ({ movie, onClick, featured = false }) => {
-  const isMovie = !!movie.title;
+  const isMovie = movie.media_type ? (movie.media_type === 'movie') : !!movie.title;
   const title = movie.title || movie.name;
 
   return (

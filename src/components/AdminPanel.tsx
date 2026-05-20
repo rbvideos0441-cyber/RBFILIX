@@ -76,8 +76,13 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       } else {
         setWhatsappNumber('5511999999999');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      const errStr = (err?.message || err?.toString() || '').toLowerCase();
+      if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+        console.warn('Could not fetch whatsapp config (offline fallback applied):', err);
+      } else {
+        console.error('Error fetching whatsapp config:', err);
+      }
     }
   };
 
@@ -86,8 +91,13 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       const snap = await getDocs(collection(db, 'users'));
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUsersList(list);
-    } catch (err) {
-      console.error('Error fetching users:', err);
+    } catch (err: any) {
+      const errStr = (err?.message || err?.toString() || '').toLowerCase();
+      if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+        console.warn('Could not fetch users (offline fallback applied):', err);
+      } else {
+        console.error('Error fetching users:', err);
+      }
     }
   };
 
@@ -159,8 +169,35 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   }, [user, activeTab]);
 
   const fetchEpisodes = async (mediaId: string) => {
-    const querySnapshot = await getDocs(collection(db, 'custom_media', mediaId, 'episodes'));
-    const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let list: any[] = [];
+    try {
+      const querySnapshot = await getDocs(collection(db, 'custom_media', mediaId, 'episodes'));
+      list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (err: any) {
+      const errStr = (err?.message || err?.toString() || '').toLowerCase();
+      if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+        console.warn('Could not fetch episodes (offline fallback applied):', err);
+      } else {
+        console.error('Error fetching episodes:', err);
+      }
+    }
+
+    // Load local episodes fallback
+    try {
+      const localEpSaved = localStorage.getItem('local_episodes');
+      if (localEpSaved) {
+        const localEpMap = JSON.parse(localEpSaved);
+        const localEps = localEpMap[mediaId] || [];
+        localEps.forEach((localEp: any) => {
+          if (!list.some(ep => ep.id === localEp.id || (ep.episode_number === localEp.episode_number && ep.season_number === localEp.season_number))) {
+            list.push(localEp);
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Error loading local episodes:', e);
+    }
+
     // Sort by season and episode number
     list.sort((a: any, b: any) => {
       if (a.season_number !== b.season_number) return a.season_number - b.season_number;
@@ -171,24 +208,54 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
   const addEpisode = async () => {
     if (!managingEpisodesFor || !newEpisode.video_url) return;
+    const mediaId = managingEpisodesFor.id as string;
+    const epDocRef = doc(collection(db, 'custom_media', mediaId, 'episodes'));
+    const epId = epDocRef.id;
+
+    const newLocalEp = {
+      id: epId,
+      ...newEpisode,
+      created_at: { toMillis: () => Date.now(), seconds: Math.floor(Date.now() / 1000) }
+    };
+
+    // Save to localStorage as immediate offline cache
     try {
-      await addDoc(collection(db, 'custom_media', managingEpisodesFor.id as string, 'episodes'), {
-        ...newEpisode,
-        created_at: serverTimestamp()
-      });
-      setNewEpisode({
-        title: '',
-        season_number: 1,
-        episode_number: episodes.length > 0 ? (episodes[episodes.length - 1].episode_number + 1) : 1,
-        video_url: '',
-        overview: ''
-      });
-      showToast('Episódio adicionado com sucesso!', 'success');
-      await fetchEpisodes(managingEpisodesFor.id as string);
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao adicionar episódio.', 'error');
+      const localEpSaved = localStorage.getItem('local_episodes') || '{}';
+      const localEpMap = JSON.parse(localEpSaved);
+      if (!localEpMap[mediaId]) {
+        localEpMap[mediaId] = [];
+      }
+      localEpMap[mediaId].push(newLocalEp);
+      localStorage.setItem('local_episodes', JSON.stringify(localEpMap));
+    } catch (e) {
+      console.error('Error saving local episode:', e);
     }
+
+    // Write to Firestore asynchronously if connected
+    setDoc(epDocRef, {
+      ...newEpisode,
+      created_at: serverTimestamp()
+    })
+      .then(() => {
+        console.log('Episódio sincronizado com o Firestore com sucesso!');
+      })
+      .catch((err: any) => {
+        console.warn('Firestore setDoc for episode failed, but saved locally:', err);
+        const errStr = (err?.message || err?.toString() || '').toLowerCase();
+        if (errStr.includes('permission')) {
+          showToast('Permissão insuficiente no Firestore para salvar online.', 'success');
+        }
+      });
+
+    setNewEpisode({
+      title: '',
+      season_number: 1,
+      episode_number: episodes.length > 0 ? (episodes[episodes.length - 1].episode_number + 1) : 1,
+      video_url: '',
+      overview: ''
+    });
+    showToast('Episódio adicionado com sucesso!', 'success');
+    await fetchEpisodes(mediaId);
   };
 
   const requestDeleteEpisode = (mediaId: string, episodeId: string, episodeTitle: string) => {
@@ -215,28 +282,60 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
     if (type === 'episode' && mediaId) {
       console.log(`Deletando episódio CONFIRMADO: mediaId=${mediaId}, episodeId=${id}`);
+      
+      // Delete from localStorage
       try {
-        const episodeRef = doc(db, 'custom_media', mediaId, 'episodes', id);
-        await deleteDoc(episodeRef);
-        console.log('Sucesso ao excluir episódio');
-        showToast('Episódio excluído com sucesso!', 'success');
-        await fetchEpisodes(mediaId);
-      } catch (err: any) {
-        console.error('Erro ao excluir episódio:', err);
-        showToast(`Erro ao excluir episódio: ${err.message || 'Erro desconhecido'}`, 'error');
+        const localEpSaved = localStorage.getItem('local_episodes');
+        if (localEpSaved) {
+          const localEpMap = JSON.parse(localEpSaved);
+          if (localEpMap[mediaId]) {
+            localEpMap[mediaId] = localEpMap[mediaId].filter((ep: any) => ep.id !== id);
+            localStorage.setItem('local_episodes', JSON.stringify(localEpMap));
+          }
+        }
+      } catch (e) {
+        console.error('Error deleting local episode:', e);
       }
+
+      // Delete from Firestore asynchronously if it is not a local-only segment
+      if (!id.startsWith('local_')) {
+        deleteDoc(doc(db, 'custom_media', mediaId, 'episodes', id))
+          .then(() => {
+            console.log('Sucesso ao excluir episódio no Firestore');
+          })
+          .catch((err: any) => {
+            console.warn('Erro ao excluir episódio no Firestore (já excluído localmente):', err);
+          });
+      }
+      showToast('Episódio excluído com sucesso!', 'success');
+      await fetchEpisodes(mediaId);
     } else if (type === 'media') {
       console.log(`Deletando mídia CONFIRMADA: id=${id}`);
+      
+      // Delete from localStorage
       try {
-        const mediaRef = doc(db, 'custom_media', id);
-        await deleteDoc(mediaRef);
-        console.log('Sucesso ao excluir mídia');
-        showToast('Mídia excluída com sucesso!', 'success');
-        await fetchCustomMedia();
-      } catch (err: any) {
-        console.error('Erro ao excluir mídia:', err);
-        showToast(`Erro ao excluir mídia: ${err.message || 'Erro desconhecido'}`, 'error');
+        const localSaved = localStorage.getItem('local_custom_media');
+        if (localSaved) {
+          const localCustom = JSON.parse(localSaved);
+          const filtered = localCustom.filter((m: any) => m.id !== id);
+          localStorage.setItem('local_custom_media', JSON.stringify(filtered));
+        }
+      } catch (e) {
+        console.error('Error deleting local custom media:', e);
       }
+
+      // Delete from Firestore asynchronously if it is not a local-only segment
+      if (!id.startsWith('local_')) {
+        deleteDoc(doc(db, 'custom_media', id))
+          .then(() => {
+            console.log('Sucesso ao excluir mídia no Firestore');
+          })
+          .catch((err: any) => {
+            console.warn('Erro ao excluir mídia no Firestore (já excluído localmente):', err);
+          });
+      }
+      showToast('Mídia excluída com sucesso!', 'success');
+      await fetchCustomMedia();
     }
   };
 
@@ -250,19 +349,46 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   };
 
   const fetchCustomMedia = async () => {
+    let list: Movie[] = [];
     try {
       const querySnapshot = await getDocs(collection(db, 'custom_media'));
-      const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Movie[];
-      // Sort by created_at descending
-      list.sort((a: any, b: any) => {
-        const timeA = a.created_at?.toMillis?.() || 0;
-        const timeB = b.created_at?.toMillis?.() || 0;
-        return timeB - timeA;
-      });
-      setMediaList(list);
-    } catch (err) {
-      console.error("Fetch Custom Media Error:", err);
+      list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Movie[];
+    } catch (err: any) {
+      const errStr = (err?.message || err?.toString() || '').toLowerCase();
+      if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+        console.warn('Could not fetch custom media (offline fallback applied):', err);
+      } else {
+        console.error("Fetch Custom Media Error:", err);
+      }
     }
+
+    // Load local custom media fallback
+    let localCustom: Movie[] = [];
+    try {
+      const localSaved = localStorage.getItem('local_custom_media');
+      if (localSaved) {
+        localCustom = JSON.parse(localSaved);
+      }
+    } catch (e) {
+      console.error('Error loading local custom media:', e);
+    }
+
+    // Merge custom from Firestore with localCustom, avoiding duplicates
+    const mergedList = [...list];
+    localCustom.forEach((localMovie) => {
+      if (!mergedList.some(m => m.id === localMovie.id || (m.title && m.title === localMovie.title) || (m.name && m.name === localMovie.name))) {
+        mergedList.push(localMovie);
+      }
+    });
+
+    // Sort by created_at descending
+    mergedList.sort((a: any, b: any) => {
+      const timeA = a.created_at?.toMillis?.() || a.created_at?.seconds * 1000 || 0;
+      const timeB = b.created_at?.toMillis?.() || b.created_at?.seconds * 1000 || 0;
+      return timeB - timeA;
+    });
+
+    setMediaList(mergedList);
   };
 
   const handleSearch = async () => {
@@ -285,48 +411,98 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       (selectedResult?.media_type === 'tv' || selectedResult?.media_type === 'anime' || !selectedResult?.title);
     
     if (isManualMode) {
-      if (!manualData.title || (!videoUrl && !isEpisodic)) return;
+      if (!manualData.title) {
+        showToast('Por favor, insira o título.', 'error');
+        return;
+      }
+      if (!videoUrl && !isEpisodic) {
+        showToast('A URL do vídeo é obrigatória para filmes.', 'error');
+        return;
+      }
     } else {
-      if (!selectedResult || (!videoUrl && !isEpisodic)) return;
+      if (!selectedResult) {
+        showToast('Nenhum título selecionado.', 'error');
+        return;
+      }
+      if (!videoUrl && !isEpisodic) {
+        showToast('A URL do vídeo é obrigatória para filmes.', 'error');
+        return;
+      }
     }
     
-    const mediaData = isManualMode ? {
+    const rawMediaData = isManualMode ? {
       ...manualData,
       category: selectedCategory,
       is_featured: isFeatured,
       video_url: videoUrl,
       is_custom: true,
-      created_at: serverTimestamp(),
+      created_at: null,
       tmdb_id: null
     } : {
       title: selectedResult!.title || null,
       name: selectedResult!.name || null,
-      overview: selectedResult!.overview,
-      poster_path: selectedResult!.poster_path,
-      backdrop_path: selectedResult!.backdrop_path,
-      vote_average: selectedResult!.vote_average,
+      overview: selectedResult!.overview || null,
+      poster_path: selectedResult!.poster_path || null,
+      backdrop_path: selectedResult!.backdrop_path || null,
+      vote_average: selectedResult!.vote_average || null,
       media_type: selectedResult!.media_type || (selectedResult!.title ? 'movie' : 'tv'),
       category: selectedCategory,
       is_featured: isFeatured,
       video_url: videoUrl,
       is_custom: true,
-      created_at: serverTimestamp(),
-      tmdb_id: selectedResult!.id
+      created_at: null,
+      tmdb_id: selectedResult!.id || null
     };
 
+    // Sanitize any remaining undefined properties to null for Firestore safety
+    const mediaData: any = {};
+    Object.keys(rawMediaData).forEach(key => {
+      mediaData[key] = (rawMediaData as any)[key] === undefined ? null : (rawMediaData as any)[key];
+    });
+
+    const customDocRef = doc(collection(db, 'custom_media'));
+    const mediaId = customDocRef.id;
+
+    const newLocalItem = {
+      ...mediaData,
+      id: mediaId,
+      created_at: { toMillis: () => Date.now(), seconds: Math.floor(Date.now() / 1000) }
+    };
+
+    // Prepend to localStorage immediately for instant offline update
     try {
-      await addDoc(collection(db, 'custom_media'), mediaData);
-      setSelectedResult(null);
-      setVideoUrl('');
-      setSearchQuery('');
-      setSearchResults([]);
-      setManualData({ title: '', overview: '', poster_path: '', backdrop_path: '', media_type: 'movie' });
-      await fetchCustomMedia();
-      showToast('Mídia adicionada com sucesso!', 'success');
-    } catch (err) {
-      console.error(err);
-      showToast('Erro ao adicionar mídia. Verifique as permissões.', 'error');
+      const localSaved = localStorage.getItem('local_custom_media');
+      const localCustom = localSaved ? JSON.parse(localSaved) : [];
+      localCustom.unshift(newLocalItem);
+      localStorage.setItem('local_custom_media', JSON.stringify(localCustom));
+    } catch (e) {
+      console.error('Error saving local custom media:', e);
     }
+
+    // Attempt to upload online asynchronously
+    const firestoreMediaData = {
+      ...mediaData,
+      created_at: serverTimestamp()
+    };
+    setDoc(customDocRef, firestoreMediaData)
+      .then(() => {
+        console.log('Mídia sincronizada com o Firestore com sucesso!');
+      })
+      .catch((err: any) => {
+        console.warn('Firestore setDoc for media failed, but saved locally:', err);
+        const errStr = (err?.message || err?.toString() || '').toLowerCase();
+        if (errStr.includes('permission')) {
+          showToast('Permissão insuficiente no Firestore para salvar online.', 'success');
+        }
+      });
+
+    setSelectedResult(null);
+    setVideoUrl('');
+    setSearchQuery('');
+    setSearchResults([]);
+    setManualData({ title: '', overview: '', poster_path: '', backdrop_path: '', media_type: 'movie' });
+    await fetchCustomMedia();
+    showToast('Mídia adicionada com sucesso!', 'success');
   };
 
   if (loading) return null;
@@ -513,7 +689,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
                       <button 
                         onClick={addMedia}
-                        disabled={!videoUrl && (selectedResult?.media_type !== 'tv' && !!selectedResult?.title)}
+                        disabled={!videoUrl && !(selectedResult?.media_type === 'tv' || selectedResult?.media_type === 'anime' || !selectedResult?.title)}
                         className="w-full mt-6 py-4 bg-brand text-white font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] transition-transform"
                       >
                         PUBLICAR AGORA
@@ -605,7 +781,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
                   <button 
                     onClick={addMedia}
-                    disabled={!manualData.title || (!videoUrl && manualData.media_type !== 'tv')}
+                    disabled={!manualData.title || (!videoUrl && !(manualData.media_type === 'tv' || manualData.media_type === 'anime'))}
                     className="w-full mt-2 py-4 bg-brand text-white font-bold rounded-xl disabled:opacity-50 hover:brightness-110 transition-all font-mono tracking-widest"
                   >
                     PUBLICAR MANUALMENTE

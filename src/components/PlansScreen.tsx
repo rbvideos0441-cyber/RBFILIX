@@ -21,8 +21,13 @@ export default function PlansScreen() {
           const rawNum = snap.data().whatsappNumber.replace(/\D/g, '');
           if (rawNum) setWhatsapp(rawNum);
         }
-      } catch (err) {
-        console.error('Error fetching whatsapp config:', err);
+      } catch (err: any) {
+        const errStr = (err?.message || err?.toString() || '').toLowerCase();
+        if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+          console.warn('Silent offline fallback for whatsapp config:', err);
+        } else {
+          console.error('Error fetching whatsapp config:', err);
+        }
       } finally {
         setCheckingInfo(false);
       }

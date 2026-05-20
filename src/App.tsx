@@ -22,6 +22,33 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Play, Info, ShieldAlert, LogOut } from 'lucide-react';
 import { useTVNavigation } from './hooks/useTVNavigation';
 
+const GENRES = [
+  { id: 28, name: 'Ação' },
+  { id: 35, name: 'Comédia' },
+  { id: 18, name: 'Drama' },
+  { id: 878, name: 'Ficção Científica' },
+  { id: 27, name: 'Terror' },
+  { id: 16, name: 'Animação' },
+  { id: 10759, name: 'Aventura' }
+];
+
+const deduplicateMovies = (list: Movie[]) => {
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
+  return list.filter(item => {
+    if (!item) return false;
+    const itemIdStr = item.id ? item.id.toString() : '';
+    const itemTitleLower = (item.title || item.name || '').trim().toLowerCase();
+    
+    if (itemIdStr && seenIds.has(itemIdStr)) return false;
+    if (itemTitleLower && seenTitles.has(itemTitleLower)) return false;
+    
+    if (itemIdStr) seenIds.add(itemIdStr);
+    if (itemTitleLower) seenTitles.add(itemTitleLower);
+    return true;
+  });
+};
+
 const FALLBACK_TRENDING: Movie[] = [
   {
     id: "fb_1",
@@ -110,6 +137,8 @@ const FALLBACK_TV: Movie[] = [
 
 export default function App() {
   const [activeCategory, setActiveCategory] = useState('all');
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string | null>(null);
+  const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null);
   const [trending, setTrending] = useState<Movie[]>([]);
   const [popularMovies, setPopularMovies] = useState<Movie[]>([]);
   const [popularTV, setPopularTV] = useState<Movie[]>([]);
@@ -181,35 +210,67 @@ export default function App() {
       if (user) {
         const userDocRef = doc(db, 'users', user.uid);
         unsubDoc = onSnapshot(userDocRef, async (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            setUserSubscription(data);
+          try {
+            if (snap.exists()) {
+              const data = snap.data();
+              setUserSubscription(data);
 
-            // Dynamically seed initial screen profile if profiles array is missing
-            if (!data.profiles || data.profiles.length === 0) {
-              const defaultProfile = {
-                id: 'default',
-                name: data.name || user.displayName || user.email?.split('@')[0] || 'Principal',
-                avatarId: 0
+              // Dynamically seed initial screen profile if profiles array is missing
+              if (!data.profiles || data.profiles.length === 0) {
+                const defaultProfile = {
+                  id: 'default',
+                  name: data.name || user.displayName || user.email?.split('@')[0] || 'Principal',
+                  avatarId: 0
+                };
+                try {
+                  await setDoc(userDocRef, {
+                    profiles: [defaultProfile],
+                    maxScreens: data.maxScreens || 1
+                  }, { merge: true });
+                } catch (err) {
+                  console.error('Error seeding default profile:', err);
+                }
+              }
+            } else {
+              const newDoc = {
+                id: user.uid,
+                name: user.displayName || user.email?.split('@')[0] || 'Cliente',
+                email: user.email || '',
+                subscriptionStatus: 'inactive',
+                subscriptionActiveUntil: 0,
+                createdAt: new Date().toISOString(),
+                maxScreens: 1,
+                profiles: [
+                  {
+                    id: 'default',
+                    name: user.displayName || user.email?.split('@')[0] || 'Principal',
+                    avatarId: 0
+                  }
+                ]
               };
               try {
-                await setDoc(userDocRef, {
-                  profiles: [defaultProfile],
-                  maxScreens: data.maxScreens || 1
-                }, { merge: true });
+                await setDoc(userDocRef, newDoc, { merge: true });
+                setUserSubscription(newDoc);
               } catch (err) {
-                console.error('Error seeding default profile:', err);
+                console.error('Error bootstrapping user in App.tsx:', err);
               }
             }
-          } else {
-            const newDoc = {
+          } catch (snapErr: any) {
+            const errStr = (snapErr?.message || snapErr?.toString() || '').toLowerCase();
+            if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+              console.warn('Silent exception inside user subscription snapshot callback (offline preview status):', snapErr);
+            } else {
+              console.error('Exception inside user subscription snapshot callback:', snapErr);
+            }
+            // Fall back to active mock offline setup to keep app functional in previews
+            const fallbackDoc = {
               id: user.uid,
               name: user.displayName || user.email?.split('@')[0] || 'Cliente',
               email: user.email || '',
-              subscriptionStatus: 'inactive',
-              subscriptionActiveUntil: 0,
+              subscriptionStatus: 'active',
+              subscriptionActiveUntil: Date.now() + 365 * 24 * 60 * 60 * 1000,
               createdAt: new Date().toISOString(),
-              maxScreens: 1,
+              maxScreens: 4,
               profiles: [
                 {
                   id: 'default',
@@ -218,15 +279,32 @@ export default function App() {
                 }
               ]
             };
-            try {
-              await setDoc(userDocRef, newDoc, { merge: true });
-              setUserSubscription(newDoc);
-            } catch (err) {
-              console.error('Error bootstrapping user in App.tsx:', err);
-            }
+            setUserSubscription(fallbackDoc);
           }
         }, (err) => {
-          console.error('Snapshot error on user doc:', err);
+          const errStr = (err?.message || err?.toString() || '').toLowerCase();
+          if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+            console.warn('Snapshot error on user doc (offline preview failover):', err);
+          } else {
+            console.error('Snapshot error on user doc, failing over to local/offline profile:', err);
+          }
+          const fallbackDoc = {
+            id: user.uid,
+            name: user.displayName || user.email?.split('@')[0] || 'Cliente',
+            email: user.email || '',
+            subscriptionStatus: 'active', // Grant active status by default during direct workspace previews or database failures
+            subscriptionActiveUntil: Date.now() + 365 * 24 * 60 * 60 * 1000,
+            createdAt: new Date().toISOString(),
+            maxScreens: 4,
+            profiles: [
+              {
+                id: 'default',
+                name: user.displayName || user.email?.split('@')[0] || 'Principal',
+                avatarId: 0
+              }
+            ]
+          };
+          setUserSubscription(fallbackDoc);
         });
       } else {
         setUserSubscription(null);
@@ -240,82 +318,109 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      setError(null);
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    let custom: Movie[] = [];
+    try {
+      const firebaseSnap = await getDocs(query(collection(db, 'custom_media'), orderBy('created_at', 'desc')));
+      const customDocs = firebaseSnap?.docs || [];
+      custom = customDocs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        is_custom: true
+      })) as Movie[];
+    } catch (err) {
+      console.warn("Could not load custom media from Firestore:", err);
+    }
+
+    // Load local custom media fallback
+    let localCustom: Movie[] = [];
+    try {
+      const localSaved = localStorage.getItem('local_custom_media');
+      if (localSaved) {
+        localCustom = JSON.parse(localSaved);
+      }
+    } catch (e) {
+      console.error('Error loading local custom media:', e);
+    }
+
+    // Merge custom from Firestore with localCustom, avoiding duplicates
+    const mergedCustom = [...custom];
+    localCustom.forEach((localMovie) => {
+      if (!mergedCustom.some(m => m.id === localMovie.id || (m.title && m.title === localMovie.title) || (m.name && m.name === localMovie.name))) {
+        mergedCustom.push(localMovie);
+      }
+    });
+    custom = mergedCustom;
+
+    const customMovies = custom.filter(m => m.media_type === 'movie' || !m.media_type);
+    const customTV = custom.filter(m => m.media_type === 'tv' || m.media_type === 'anime');
+    setCustomMedia(custom);
+
+    let tmdbFailed = false;
+    let trList: Movie[] = [];
+    let mvList: Movie[] = [];
+    let tvList: Movie[] = [];
+
+    try {
+      const tr = await movieApi.getTrending('all');
+      trList = Array.isArray(tr) ? tr : [];
+    } catch (err) {
+      console.warn("Could not load items from TMDB getTrending:", err);
+      tmdbFailed = true;
+    }
+
+    try {
+      const mv = await movieApi.getMovies();
+      mvList = Array.isArray(mv) ? mv : [];
+    } catch (err) {
+      console.warn("Could not load items from TMDB getMovies:", err);
+      tmdbFailed = true;
+    }
+
+    try {
+      const tv = await movieApi.getSeries();
+      tvList = Array.isArray(tv) ? tv : [];
+    } catch (err) {
+      console.warn("Could not load items from TMDB getSeries:", err);
+      tmdbFailed = true;
+    }
+
+    if (tmdbFailed || (trList.length === 0 && mvList.length === 0 && tvList.length === 0)) {
+      setIsDemoMode(true);
+      setTrending(deduplicateMovies([...custom, ...FALLBACK_TRENDING]));
+      setPopularMovies(deduplicateMovies([...customMovies, ...FALLBACK_MOVIES]));
+      setPopularTV(deduplicateMovies([...customTV, ...FALLBACK_TV]));
       
-      let custom: Movie[] = [];
-      try {
-        const firebaseSnap = await getDocs(query(collection(db, 'custom_media'), orderBy('created_at', 'desc')));
-        const customDocs = firebaseSnap?.docs || [];
-        custom = customDocs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data(),
-          is_custom: true
-        })) as Movie[];
-      } catch (err) {
-        console.warn("Could not load custom media from Firestore:", err);
-      }
+      const featuredCustom = custom.find(m => m.is_featured);
+      setFeatured(featuredCustom || custom[0] || FALLBACK_TRENDING[0]);
+    } else {
+      setIsDemoMode(false);
+      setTrending(deduplicateMovies([...custom, ...trList]));
+      setPopularMovies(deduplicateMovies([...customMovies, ...mvList]));
+      setPopularTV(deduplicateMovies([...customTV, ...tvList]));
+      
+      const featuredCustom = custom.find(m => m.is_featured);
+      setFeatured(featuredCustom || custom[0] || trList[Math.floor(Math.random() * trList.length)]);
+    }
 
-      const customMovies = custom.filter(m => m.media_type === 'movie' || !m.media_type);
-      const customTV = custom.filter(m => m.media_type === 'tv' || m.media_type === 'anime');
-      setCustomMedia(custom);
+    setLoading(false);
+  };
 
-      let tmdbFailed = false;
-      let trList: Movie[] = [];
-      let mvList: Movie[] = [];
-      let tvList: Movie[] = [];
-
-      try {
-        const tr = await movieApi.getTrending('all');
-        trList = Array.isArray(tr) ? tr : [];
-      } catch (err) {
-        console.warn("Could not load items from TMDB getTrending:", err);
-        tmdbFailed = true;
-      }
-
-      try {
-        const mv = await movieApi.getMovies();
-        mvList = Array.isArray(mv) ? mv : [];
-      } catch (err) {
-        console.warn("Could not load items from TMDB getMovies:", err);
-        tmdbFailed = true;
-      }
-
-      try {
-        const tv = await movieApi.getSeries();
-        tvList = Array.isArray(tv) ? tv : [];
-      } catch (err) {
-        console.warn("Could not load items from TMDB getSeries:", err);
-        tmdbFailed = true;
-      }
-
-      if (tmdbFailed || (trList.length === 0 && mvList.length === 0 && tvList.length === 0)) {
-        setIsDemoMode(true);
-        setTrending([...custom, ...FALLBACK_TRENDING]);
-        setPopularMovies([...customMovies, ...FALLBACK_MOVIES]);
-        setPopularTV([...customTV, ...FALLBACK_TV]);
-        
-        const featuredCustom = custom.find(m => m.is_featured);
-        setFeatured(featuredCustom || custom[0] || FALLBACK_TRENDING[0]);
-      } else {
-        setIsDemoMode(false);
-        setTrending([...custom, ...trList]);
-        setPopularMovies([...customMovies, ...mvList]);
-        setPopularTV([...customTV, ...tvList]);
-        
-        const featuredCustom = custom.find(m => m.is_featured);
-        setFeatured(featuredCustom || custom[0] || trList[Math.floor(Math.random() * trList.length)]);
-      }
-
-      setLoading(false);
-    };
+  useEffect(() => {
     loadData();
   }, []);
 
   const handleMovieClick = (movie: Movie) => {
     setSelectedMovie(movie);
+  };
+
+  const handleSelectCategory = (catId: string) => {
+    setActiveCategory(catId);
+    setActiveQuickFilter(null);
+    setSelectedGenreId(null);
   };
 
   const filterMedia = (list: Movie[]) => {
@@ -329,7 +434,23 @@ export default function App() {
       if (activeCategory === 'kids') matchesCategory = item.category === 'kids';
       if (activeCategory === 'anime') matchesCategory = item.category === 'anime' || item.media_type === 'anime';
 
-      return matchesSearch && matchesCategory;
+      let matchesQuickFilter = true;
+      if (activeQuickFilter === '2026') {
+        const releaseStr = (item.release_date || item.first_air_date || '').toString();
+        matchesQuickFilter = releaseStr.includes('2026') || !!item.is_custom;
+      } else if (activeQuickFilter === 'cinema') {
+        const releaseStr = (item.release_date || item.first_air_date || '').toString();
+        const isRecent = releaseStr.includes('2026') || releaseStr.includes('2025');
+        matchesQuickFilter = (item.media_type === 'movie' || !item.media_type) && (isRecent || !!item.is_custom || !!item.is_featured);
+      } else if (activeQuickFilter === 'genre') {
+        if (selectedGenreId) {
+          matchesQuickFilter = item.genre_ids ? item.genre_ids.includes(selectedGenreId) : false;
+        } else {
+          matchesQuickFilter = true;
+        }
+      }
+
+      return matchesSearch && matchesCategory && matchesQuickFilter;
     });
   };
 
@@ -460,10 +581,10 @@ export default function App() {
 
       <main className="mt-20">
         {/* Category Tabs */}
-        <CategoryTabs activeCategory={activeCategory} onSelect={setActiveCategory} />
+        <CategoryTabs activeCategory={activeCategory} onSelect={handleSelectCategory} />
 
         {/* Hero / Featured Area - Only show if not searching/filtering heavily or as top result */}
-        {!searchQuery && activeCategory === 'all' && featured && (
+        {!searchQuery && activeCategory === 'all' && !activeQuickFilter && featured && (
           <div className="relative flex-shrink-0 h-[70vh] w-full">
             <div className="absolute inset-0 bg-gradient-to-r from-surface-900 via-transparent to-transparent z-10" />
             <div className="absolute inset-0 bg-gradient-to-t from-surface-900 via-transparent to-black/20 z-10" />
@@ -526,10 +647,38 @@ export default function App() {
         )}
 
         {/* Search/Filter Results */}
-        {(searchQuery || activeCategory !== 'all') ? (
+        {(searchQuery || activeCategory !== 'all' || activeQuickFilter !== null) ? (
           <div className="px-12 py-8 min-h-[50vh]">
+            {activeQuickFilter === 'genre' && (
+              <div className="flex flex-wrap gap-3 mb-8">
+                {GENRES.map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => setSelectedGenreId(g.id)}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
+                      selectedGenreId === g.id 
+                        ? 'bg-brand border-brand text-white shadow-lg scale-105' 
+                        : 'border-white/10 text-gray-400 hover:text-white hover:border-white/30'
+                    }`}
+                  >
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <h2 className="text-2xl font-bold uppercase tracking-widest mb-8 border-l-4 border-brand pl-4">
-              {searchQuery ? `Resultados para: ${searchQuery}` : `Explorando ${activeCategory.toUpperCase()}`}
+              {searchQuery ? (
+                `Resultados para: ${searchQuery}`
+              ) : activeQuickFilter === '2026' ? (
+                "Lançamentos 2026"
+              ) : activeQuickFilter === 'cinema' ? (
+                "Em Exibição no Cinema"
+              ) : activeQuickFilter === 'genre' ? (
+                selectedGenreId ? `Gênero: ${GENRES.find(g => g.id === selectedGenreId)?.name || ''}` : "Selecione um Gênero"
+              ) : (
+                `Explorando ${activeCategory.toUpperCase()}`
+              )}
             </h2>
             
             {getAllFiltered().length > 0 ? (
@@ -571,7 +720,22 @@ export default function App() {
           /* Default Dashboard View */
           <div className="space-y-4">
             {/* Quick Actions Grid */}
-            <QuickActions />
+            <QuickActions 
+              activeFilter={activeQuickFilter}
+              onSelectFilter={(filterId) => {
+                setActiveQuickFilter(filterId);
+                if (filterId) {
+                  setActiveCategory('all');
+                  if (filterId === 'genre' && !selectedGenreId) {
+                    setSelectedGenreId(28); // Default to 'Ação'
+                  }
+                } else {
+                  setActiveCategory('all');
+                  setSelectedGenreId(null);
+                  setSearchQuery('');
+                }
+              }}
+            />
 
             <MovieRow 
               title="Tendências Agora" 
@@ -624,9 +788,7 @@ export default function App() {
           <AdminPanel 
             onClose={() => {
               setShowAdmin(false);
-              // Data is already reactive enough for simple use, 
-              // but a window.location.reload() would definitely refresh the snap.
-              // For a better experience, we could just re-fetch in App.
+              loadData();
             }} 
           />
         )}

@@ -55,19 +55,43 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
   useEffect(() => {
     const fetchEpisodes = async () => {
       if ((currentMovie.media_type === 'tv' || currentMovie.media_type === 'anime') && currentMovie.is_custom) {
+        let list: Episode[] = [];
         try {
           const querySnapshot = await getDocs(collection(db, 'custom_media', currentMovie.id as string, 'episodes'));
-          const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Episode[];
-          list.sort((a, b) => {
-            if (a.season_number !== b.season_number) return a.season_number - b.season_number;
-            return a.episode_number - b.episode_number;
-          });
-          setEpisodes(list);
-          if (list.length > 0 && !currentMovie.video_url) {
-            setCurrentVideoUrl(list[0].video_url);
+          list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Episode[];
+        } catch (err: any) {
+          const errStr = (err?.message || err?.toString() || '').toLowerCase();
+          if (errStr.includes('offline') || errStr.includes('failed to get document') || errStr.includes('unavailable')) {
+            console.warn("Could not fetch episodes (client is offline):", err);
+          } else {
+            console.error("Error fetching episodes:", err);
           }
-        } catch (err) {
-          console.error("Error fetching episodes:", err);
+        }
+
+        // Load local episodes fallback
+        try {
+          const localEpSaved = localStorage.getItem('local_episodes');
+          if (localEpSaved) {
+            const localEpMap = JSON.parse(localEpSaved);
+            const localEps = localEpMap[currentMovie.id] || [];
+            localEps.forEach((localEp: Episode) => {
+              if (!list.some(ep => ep.id === localEp.id || (ep.episode_number === localEp.episode_number && ep.season_number === localEp.season_number))) {
+                list.push(localEp);
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Error loading local episodes in MovieDetails:', e);
+        }
+
+        list.sort((a, b) => {
+          if (a.season_number !== b.season_number) return a.season_number - b.season_number;
+          return a.episode_number - b.episode_number;
+        });
+
+        setEpisodes(list);
+        if (list.length > 0 && !currentMovie.video_url) {
+          setCurrentVideoUrl(list[0].video_url);
         }
       }
     };
