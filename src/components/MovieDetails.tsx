@@ -250,18 +250,16 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
             </p>
 
             <div className="flex flex-wrap gap-4">
-              <button 
-                onClick={handlePlay}
-                tabIndex={0}
-                className="flex items-center gap-2 px-10 py-4 rounded bg-white font-bold text-black hover:bg-gray-200 transition-colors shadow-2xl cursor-pointer uppercase tracking-wider tv-focusable"
-              >
-                <Play size={20} fill="currentColor" />
-                Assistir
-              </button>
-              <button tabIndex={0} className="flex items-center gap-2 px-10 py-4 rounded bg-gray-500/30 backdrop-blur-md font-bold text-white hover:bg-gray-500/40 transition-colors cursor-pointer uppercase tracking-wider tv-focusable">
-                <Plus size={20} />
-                Mais Informações
-              </button>
+              {!(currentMovie.media_type === 'tv' || currentMovie.media_type === 'anime') && (
+                <button 
+                  onClick={handlePlay}
+                  tabIndex={0}
+                  className="flex items-center gap-2 px-10 py-4 rounded bg-white font-bold text-black hover:bg-gray-200 transition-colors shadow-2xl cursor-pointer uppercase tracking-wider tv-focusable"
+                >
+                  <Play size={20} fill="currentColor" />
+                  Assistir
+                </button>
+              )}
               <button tabIndex={0} className="flex items-center gap-2 px-6 py-4 rounded bg-gray-500/30 backdrop-blur-md font-bold text-white hover:bg-gray-500/40 transition-colors cursor-pointer uppercase tracking-wider tv-focusable">
                 <Heart size={20} />
               </button>
