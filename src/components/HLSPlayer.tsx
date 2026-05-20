@@ -24,9 +24,13 @@ export default function HLSPlayer({ url, playing, onError, onReady }: HLSPlayerP
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
+      hlsRef.current = null;
     }
 
-    if (Hls.isSupported()) {
+    // Check if it's an HLS stream source by extension / url contains
+    const isHLS = url.toLowerCase().includes('.m3u8') || url.toLowerCase().includes('m3u8');
+
+    if (isHLS && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         xhrSetup: (xhr) => {
@@ -63,24 +67,52 @@ export default function HLSPlayer({ url, playing, onError, onReady }: HLSPlayerP
           }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native support (Safari)
+    } else if (isHLS && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native Safari HLS
       video.src = url;
-      video.addEventListener('loadedmetadata', () => {
-        setLoading(false);
-        onReady?.();
-      });
     } else {
-      setError("HLS não suportado neste navegador");
-      onError?.("HLS not supported");
+      // Direct file play (MP4, MP4 fallback, or standard direct layouts)
+      video.src = url;
     }
   };
 
   useEffect(() => {
+    const video = videoRef.current;
+    
+    const handleLoadedMetadata = () => {
+      setLoading(false);
+      onReady?.();
+    };
+
+    const handleCanPlay = () => {
+      setLoading(false);
+    };
+
+    const handleNativeError = (e: any) => {
+      console.error("Native Video Error Event:", e);
+      setError("Não foi possível reproduzir este vídeo. Certifique-se de que o URL do vídeo é direto (ex: MP4, M3U8, etc) e está ativo.");
+      onError?.(e);
+    };
+
+    if (video) {
+      video.addEventListener('loadedmetadata', handleLoadedMetadata);
+      video.addEventListener('canplay', handleCanPlay);
+      video.addEventListener('error', handleNativeError);
+    }
+
     initPlayer();
+
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      if (video) {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        video.removeEventListener('canplay', handleCanPlay);
+        video.removeEventListener('error', handleNativeError);
+        video.removeAttribute('src');
+        video.load();
       }
     };
   }, [url]);

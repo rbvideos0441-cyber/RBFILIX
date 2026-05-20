@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { db } from '../lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { Movie, Episode, IMAGE_BASE_URL, POSTER_BASE_URL } from '../types';
@@ -22,6 +22,7 @@ interface MovieDetailsProps {
 }
 
 export default function MovieDetails({ movie: initialMovie, onClose }: MovieDetailsProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [currentMovie, setCurrentMovie] = useState<Movie>(initialMovie);
   const [details, setDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -30,6 +31,7 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null);
 
   const [playerError, setPlayerError] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentMovie(initialMovie);
@@ -37,7 +39,18 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
     setPlayerError(false);
     setEpisodes([]);
     setCurrentVideoUrl(initialMovie.video_url || null);
+
+    if (containerRef.current) {
+      containerRef.current.scrollTo({ top: 0, behavior: 'instant' });
+    }
   }, [initialMovie]);
+
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
 
   useEffect(() => {
     const fetchEpisodes = async () => {
@@ -98,61 +111,84 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
       setPlayerError(false);
       setIsPlaying(true);
     } else {
-      alert("Vídeo indisponível para este título no momento.");
+      setToastMessage("Vídeo indisponível para este título no momento.");
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] bg-surface-900 overflow-y-auto"
-    >
-      {/* Backdrop Section */}
-      <div className="relative w-full h-[60vh] md:h-[80vh] bg-black">
-        <div className={`absolute inset-0 z-50 bg-black transition-opacity duration-500 ${isPlaying ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-          <button 
-            id="player-close-btn"
-            onClick={() => {
-              setIsPlaying(false);
-              setPlayerError(false);
-            }}
-            tabIndex={0}
-            className="absolute top-8 left-8 p-3 rounded-full bg-black/50 hover:bg-white hover:text-black transition-all z-[60] cursor-pointer tv-focusable"
+    <>
+      {/* Toast Notification for Iframe Sandbox safety */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -50, x: '-50%' }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[250] bg-red-600 border border-white/10 text-white px-6 py-3.5 rounded-xl shadow-2xl font-bold flex items-center gap-2.5 text-sm uppercase tracking-wider text-center"
           >
-            <X size={24} />
-          </button>
-          <div className="w-full h-full flex items-center justify-center">
-            {currentVideoUrl && (
+            <span className="w-2 h-2 bg-white rounded-full animate-ping" />
+            <span>{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Full-Screen Immersive Video Player Overlay (Scroll-proof) */}
+      <AnimatePresence>
+        {isPlaying && currentVideoUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-black flex items-center justify-center"
+          >
+            <button 
+              id="player-close-btn"
+              onClick={() => {
+                setIsPlaying(false);
+                setPlayerError(false);
+              }}
+              tabIndex={0}
+              className="absolute top-8 left-8 p-3 rounded-full bg-black/50 text-white hover:bg-white hover:text-black transition-all z-[210] cursor-pointer"
+            >
+              <X size={24} />
+            </button>
+            <div className="w-full h-full flex items-center justify-center">
               <HLSPlayer 
                 url={currentVideoUrl}
                 playing={isPlaying}
                 onError={() => setPlayerError(true)}
               />
-            )}
-          </div>
-        </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        <img
-          src={getImageUrl(currentMovie.backdrop_path, IMAGE_BASE_URL)}
-          className="w-full h-full object-cover"
-          alt={currentMovie.title || currentMovie.name}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-surface-900 via-surface-900/40 to-transparent pointer-events-none" />
-        
-        {!isPlaying && (
+      <motion.div
+        ref={containerRef}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[100] bg-surface-900 overflow-y-auto"
+      >
+        {/* Backdrop Section */}
+        <div className="relative w-full h-[60vh] md:h-[80vh] bg-black">
+          <img
+            src={getImageUrl(currentMovie.backdrop_path, IMAGE_BASE_URL)}
+            className="w-full h-full object-cover"
+            alt={currentMovie.title || currentMovie.name}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-surface-900 via-surface-900/40 to-transparent pointer-events-none" />
+          
           <button
             id="movie-details-close-btn"
             onClick={handleClose}
             tabIndex={0}
-            className="absolute top-8 right-8 p-3 rounded-full bg-black/50 hover:bg-black/80 transition-colors z-50 cursor-pointer tv-focusable"
+            className="absolute top-8 right-8 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white transition-colors z-50 cursor-pointer tv-focusable"
           >
             <X size={24} />
           </button>
-        )}
 
-        <div className="absolute bottom-0 left-0 right-0 p-8 md:p-16 max-w-5xl">
+          <div className="absolute bottom-0 left-0 right-0 p-8 md:p-16 max-w-5xl">
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -310,5 +346,6 @@ export default function MovieDetails({ movie: initialMovie, onClose }: MovieDeta
          )}
       </div>
     </motion.div>
-  );
+  </>
+);
 }
